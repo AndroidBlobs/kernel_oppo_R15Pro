@@ -32,6 +32,7 @@
 #include <soc/qcom/minidump.h>
 #include <soc/qcom/watchdog.h>
 
+
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
 #define TCSR_WDT_CFG	0x30
@@ -53,7 +54,7 @@
 
 static struct msm_watchdog_data *wdog_data;
 
-static int cpu_idle_pc_state[NR_CPUS];
+int cpu_idle_pc_state[NR_CPUS];
 
 /*
  * user_pet_enable:
@@ -367,8 +368,11 @@ static void keep_alive_response(void *info)
 static void ping_other_cpus(struct msm_watchdog_data *wdog_dd)
 {
 	int cpu;
+
 	cpumask_clear(&wdog_dd->alive_mask);
 	smp_mb();
+
+
 	for_each_cpu(cpu, cpu_online_mask) {
 		if (!cpu_idle_pc_state[cpu] && !cpu_isolated(cpu))
 			smp_call_function_single(cpu, keep_alive_response,
@@ -413,6 +417,7 @@ static __ref int watchdog_kthread(void *arg)
 			delay_time = msecs_to_jiffies(wdog_dd->pet_time);
 			pet_watchdog(wdog_dd);
 		}
+
 		/* Check again before scheduling *
 		 * Could have been changed on other cpu */
 		mod_timer(&wdog_dd->pet_timer, jiffies + delay_time);
@@ -498,8 +503,10 @@ static irqreturn_t wdog_bark_handler(int irq, void *dev_id)
 	nanosec_rem = do_div(wdog_dd->last_pet, 1000000000);
 	printk(KERN_INFO "Watchdog last pet at %lu.%06lu\n", (unsigned long)
 		wdog_dd->last_pet, nanosec_rem / 1000);
-	if (wdog_dd->do_ipi_ping)
+	if (wdog_dd->do_ipi_ping) {
 		dump_cpu_alive_mask(wdog_dd);
+	}
+
 	msm_trigger_wdog_bite();
 	panic("Failed to cause a watchdog bite! - Falling back to kernel panic!");
 	return IRQ_HANDLED;
