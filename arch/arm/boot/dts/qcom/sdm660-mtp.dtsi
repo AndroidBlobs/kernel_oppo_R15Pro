@@ -44,7 +44,12 @@
 	qcom,vddp-ref-clk-supply = <&pm660_l1>;
 	qcom,vddp-ref-clk-max-microamp = <100>;
 
-	status = "ok";
+//#ifndef VENDOR_EDIT
+//yh@BSP.Storage.Emmc, 2017-05-23 add for keep emmc vccq always on
+//	status = "ok";
+//#else
+	status = "disabled";
+//#endif
 };
 
 &pm660_gpios {
@@ -183,6 +188,23 @@
 &dsi_rm67195_amoled_fhd_cmd {
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
 };
+
+
+//#ifdef VENDOR_EDIT
+//Shengjun.Gou@PSW.MM.Driver.Stability, 2017/09/19,
+//modify for amoled panel power supply
+&dsi_oppo16051samsung_s6e3fa3_1080p_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
+&dsi_oppo17011samsung_sofeg01_s_1080p_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+
+&dsi_oppo17081samsung_ams596w401_1080_2280_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+};
+//#endif /*VENDOR_EDIT*/
 
 &dsi_lgd_incell_sw49106_fhd_video {
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_wled";
