@@ -8971,8 +8971,17 @@ static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 		mcc->cpu = cpu;
 #ifdef CONFIG_SCHED_DEBUG
 		raw_spin_unlock_irqrestore(&mcc->lock, flags);
+#ifndef VENDOR_EDIT
+// wenbin.liu@BSP.CHG.Basic, 2018/01/09
+// Add for mp log too more
 		printk_deferred(KERN_INFO "CPU%d: update max cpu_capacity %lu\n",
 				cpu, capacity);
+#else
+#if (defined(CONFIG_OPPO_DAILY_BUILD) || defined(CONFIG_OPPO_SPECIAL_BUILD))
+		printk_deferred(KERN_INFO "CPU%d: update max cpu_capacity %lu\n",
+				cpu, capacity);
+#endif
+#endif /*VENDOR_EDIT*/
 		goto skip_unlock;
 #endif
 	}

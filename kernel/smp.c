@@ -36,6 +36,7 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline);
 static bool have_boot_cpu_mask;
 static cpumask_var_t boot_cpu_mask;
 
+
 static int
 hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
@@ -383,6 +384,7 @@ int smp_call_function_any(const struct cpumask *mask,
 
 	/* Any online will do: smp_call_function_single handles nr_cpu_ids. */
 	cpu = cpumask_any_and(mask, cpu_online_mask);
+
 call:
 	ret = smp_call_function_single(cpu, func, info, wait);
 	put_cpu();
@@ -447,6 +449,7 @@ void smp_call_function_many(const struct cpumask *mask,
 	/* Some callers race with other cpus changing the passed mask */
 	if (unlikely(!cpumask_weight(cfd->cpumask)))
 		return;
+
 
 	for_each_cpu(cpu, cfd->cpumask) {
 		struct call_single_data *csd = per_cpu_ptr(cfd->csd, cpu);
