@@ -2101,6 +2101,7 @@ static void binder_send_failed_reply(struct binder_transaction *t,
 	}
 }
 
+#ifdef VENDOR_EDIT//Fanhong.Kong@PSW.BSP.CHG, 2018/1/18, Add for transaction release 2times,case 03307495
 /**
  * binder_cleanup_transaction() - cleans up undelivered transaction
  * @t:		transaction that needs to be cleaned up
@@ -2120,6 +2121,7 @@ static void binder_cleanup_transaction(struct binder_transaction *t,
 		binder_free_transaction(t);
 	}
 }
+#endif /*VENDOR_EDIT*/
 
 /**
  * binder_validate_object() - checks for a valid metadata object in a buffer.
@@ -2806,6 +2808,59 @@ static struct binder_node *binder_get_node_refs_for_txn(
 	return target_node;
 }
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_ELSA_STUB)
+//huangliang@Swdp2.shanghai, 2018/03/30, parse parcel data to get descriptor
+#define STRICT_MODE_PENALTY_GATHER 				0x40
+#define STRICT_MODE_PENALTY_GATHER_OFFSET		2
+#define LENGTH_OFFSET							4
+#define DESCRIPTOR_OFFSET						8
+#define BUFFER_LENGTH							140
+/*
+* Parcel data format,   littel Endien
+  first int32   (0x40 << 16)
+  second int32  is Descripter length
+  Descripter be writen by String16 format
+	
+											    Parcel(
+0x00000000: 00400000 00000029 006f0063 002e006d '..@.)...c.o.m...'
+0x00000010: 006e0061 00720064 0069006f 002e0064 'a.n.d.r.o.i.d...'
+0x00000020: 006e0069 00650074 006e0072 006c0061 'i.n.t.e.r.n.a.l.'
+0x00000030: 0074002e 006c0065 00700065 006f0068 '..t.e.l.e.p.h.o.'
+0x00000040: 0079006e 0049002e 00650054 0065006c 'n.y...I.T.e.l.e.'
+0x00000050: 00680070 006e006f 00000079 00000001 'p.h.o.n.y.......')
+*/
+
+void parse_parcel(struct binder_transaction_data *tr, char *out_buf)
+{
+	char buf[BUFFER_LENGTH];
+	int loop_count;
+	int i = 0;
+
+	if(!copy_from_user(buf, (char*)tr->data.ptr.buffer, (tr->data_size>BUFFER_LENGTH)?BUFFER_LENGTH:tr->data_size)){
+		if(buf[STRICT_MODE_PENALTY_GATHER_OFFSET] == STRICT_MODE_PENALTY_GATHER){
+			/*check descriptor length wether override buf len*/
+			if(buf[LENGTH_OFFSET]*2 >= BUFFER_LENGTH-DESCRIPTOR_OFFSET){
+				loop_count =  BUFFER_LENGTH-DESCRIPTOR_OFFSET;
+			}else{
+				loop_count = buf[LENGTH_OFFSET]*2;
+			}
+
+			/*move descriptor character*/
+			for(i = 0; i < loop_count; i++){
+				if(i % 2 == 0){
+					buf[DESCRIPTOR_OFFSET + i/2] = buf[DESCRIPTOR_OFFSET+i];
+				}
+			}
+			buf[DESCRIPTOR_OFFSET+loop_count/2]='\0';
+			//binder_user_error("parcel:tr->flags = %d, count = %d, %s",tr->flags, buf[LENGTH_OFFSET],&buf[DESCRIPTOR_OFFSET]);
+			memcpy(out_buf,&buf[DESCRIPTOR_OFFSET],loop_count/2+1);
+		}
+	}
+
+}
+
+#endif
+
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -2829,6 +2884,11 @@ static void binder_transaction(struct binder_proc *proc,
 	binder_size_t last_fixup_min_off = 0;
 	struct binder_context *context = proc->context;
 	int t_debug_id = atomic_inc_return(&binder_last_id);
+#if defined(VENDOR_EDIT) && defined(CONFIG_ELSA_STUB)
+//zhoumingjun@Swdp.shanghai, 2017/07/10, notify user space when binder transaction starts
+	struct process_event_data pe_data;
+	struct process_event_binder pe_binder;
+#endif
 
 	e = binder_transaction_log_add(&binder_transaction_log);
 	e->debug_id = t_debug_id;
@@ -3060,7 +3120,6 @@ static void binder_transaction(struct binder_proc *proc,
 		t->buffer = NULL;
 		goto err_binder_alloc_buf_failed;
 	}
-	t->buffer->allow_user_free = 0;
 	t->buffer->debug_id = t->debug_id;
 	t->buffer->transaction = t;
 	t->buffer->target_node = target_node;
@@ -3259,7 +3318,30 @@ static void binder_transaction(struct binder_proc *proc,
 	tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
 	binder_enqueue_work(proc, tcomplete, &thread->todo);
 	t->work.type = BINDER_WORK_TRANSACTION;
+#if defined(VENDOR_EDIT) && defined(CONFIG_ELSA_STUB)
+//zhoumingjun@Swdp.shanghai, 2017/07/10, notify user space when binder transaction starts
+	if (target_proc->tsk != NULL) {
+		pe_binder.src = proc->tsk;
+		pe_binder.dst = target_proc->tsk;
+		pe_binder.code = tr->code;
+		pe_binder.flags = tr->flags;
+		
 
+		pe_data.pid = target_proc->pid;
+		pe_data.uid = task_uid(target_proc->tsk);
+		pe_data.reason = proc->pid;
+		pe_data.reason2 = t->code;
+		pe_data.binder_flag = tr->flags;
+		pe_data.priv = &pe_binder;
+		memset(pe_data.buf,0,BINDER_DESCRIPTOR_SIZE);
+		parse_parcel(tr,pe_data.buf);
+		pe_data.freeze_binder_count = 0;
+		process_event_notifier_call_chain_atomic(PROCESS_EVENT_BINDER, &pe_data);
+	} else {
+		binder_user_error("do not process_event_notifier_call_chain_atomic, target_proc->tsk == NULL");
+	}
+#endif
+	
 	if (reply) {
 		binder_inner_proc_lock(target_proc);
 		if (target_thread->is_dead) {
@@ -3292,6 +3374,7 @@ static void binder_transaction(struct binder_proc *proc,
 		if (!binder_proc_transaction(t, target_proc, NULL))
 			goto err_dead_proc_or_thread;
 	}
+
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
 	binder_proc_dec_tmpref(target_proc);
@@ -3303,6 +3386,7 @@ static void binder_transaction(struct binder_proc *proc,
 	 */
 	smp_wmb();
 	WRITE_ONCE(e->debug_id_done, t_debug_id);
+
 	return;
 
 err_dead_proc_or_thread:
@@ -3551,14 +3635,18 @@ static int binder_thread_write(struct binder_proc *proc,
 
 			buffer = binder_alloc_prepare_to_free(&proc->alloc,
 							      data_ptr);
-			if (buffer == NULL) {
-				binder_user_error("%d:%d BC_FREE_BUFFER u%016llx no match\n",
-					proc->pid, thread->pid, (u64)data_ptr);
-				break;
-			}
-			if (!buffer->allow_user_free) {
-				binder_user_error("%d:%d BC_FREE_BUFFER u%016llx matched unreturned buffer\n",
-					proc->pid, thread->pid, (u64)data_ptr);
+			if (IS_ERR_OR_NULL(buffer)) {
+				if (PTR_ERR(buffer) == -EPERM) {
+					binder_user_error(
+						"%d:%d BC_FREE_BUFFER u%016llx matched unreturned or currently freeing buffer\n",
+						proc->pid, thread->pid,
+						(u64)data_ptr);
+				} else {
+					binder_user_error(
+						"%d:%d BC_FREE_BUFFER u%016llx no match\n",
+						proc->pid, thread->pid,
+						(u64)data_ptr);
+				}
 				break;
 			}
 			binder_debug(BINDER_DEBUG_FREE_BUFFER,
@@ -4208,10 +4296,12 @@ retry:
 		if (put_user(cmd, (uint32_t __user *)ptr)) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
-
+				
+#ifdef VENDOR_EDIT//Fanhong.Kong@PSW.BSP.CHG, 2018/1/18, Add for transaction release 2times,case 03307495
 			binder_cleanup_transaction(t, "put_user failed",
-						   BR_FAILED_REPLY);
-
+						   BR_FAILED_REPLY);	
+#endif /*VENDOR_EDIT*/		
+				   
 			return -EFAULT;
 		}
 		ptr += sizeof(uint32_t);
@@ -4219,9 +4309,10 @@ retry:
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
 
-			binder_cleanup_transaction(t, "copy_to_user failed",
-						   BR_FAILED_REPLY);
-
+#ifdef VENDOR_EDIT//Fanhong.Kong@PSW.BSP.CHG, 2018/1/18, Add for transaction release 2times,case 03307495				
+			binder_cleanup_transaction(t, "copy_to_user failed", BR_FAILED_REPLY);
+#endif /*VENDOR_EDIT*/	
+		
 			return -EFAULT;
 		}
 		ptr += sizeof(tr);
@@ -4292,8 +4383,22 @@ static void binder_release_work(struct binder_proc *proc,
 
 			t = container_of(w, struct binder_transaction, work);
 
+#ifndef VENDOR_EDIT//Fanhong.Kong@PSW.BSP.CHG, 2018/1/18, Add for transaction release 2times,case 03307495			
+/*			if (t->buffer->target_node &&
+			    !(t->flags & TF_ONE_WAY)) {
+				binder_send_failed_reply(t, BR_DEAD_REPLY);
+			} else {
+				binder_debug(BINDER_DEBUG_DEAD_TRANSACTION,
+					"undelivered transaction %d\n",
+					t->debug_id);
+				binder_free_transaction(t);
+			}
+*/
+#else /*VENDOR_EDIT*/		
 			binder_cleanup_transaction(t, "process died.",
-						   BR_DEAD_REPLY);
+						   BR_DEAD_REPLY);	
+#endif /*VENDOR_EDIT*/	
+						   	
 		} break;
 		case BINDER_WORK_RETURN_ERROR: {
 			struct binder_error *e = container_of(
@@ -4730,6 +4835,7 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 err:
 	if (thread)
 		thread->looper_need_return = false;
+
 	wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret && ret != -ERESTARTSYS)
 		pr_info("%d:%d ioctl %x %lx returned %d\n", proc->pid, current->pid, cmd, arg, ret);
