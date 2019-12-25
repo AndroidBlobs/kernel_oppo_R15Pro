@@ -149,6 +149,11 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		"CmaTotal:       %8lu kB\n"
 		"CmaFree:        %8lu kB\n"
 #endif
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21 */
+		"Oppo0Free:      %8lu kB\n"
+		"Oppo2Free:      %8lu kB\n"
+#endif /* VENDOR_EDIT */
 		,
 		K(i.totalram),
 		K(i.freeram),
@@ -208,6 +213,11 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 		, K(totalcma_pages)
 		, K(global_page_state(NR_FREE_CMA_PAGES))
 #endif
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21 */
+		, K(global_page_state(NR_FREE_OPPO0_PAGES))
+		, K(global_page_state(NR_FREE_OPPO2_PAGES))
+#endif /* VENDOR_EDIT */
 		);
 
 	hugetlb_report_meminfo(m);
