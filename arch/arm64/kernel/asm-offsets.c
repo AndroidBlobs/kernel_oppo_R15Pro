@@ -149,5 +149,16 @@ int main(void)
   DEFINE(HIBERN_PBE_ORIG,	offsetof(struct pbe, orig_address));
   DEFINE(HIBERN_PBE_ADDR,	offsetof(struct pbe, address));
   DEFINE(HIBERN_PBE_NEXT,	offsetof(struct pbe, next));
+#ifdef VENDOR_EDIT
+//wangzhenhua@Plf.Framework,2017/10/09, modify for oppo root check
+#ifdef CONFIG_OPPO_ROOT_CHECK
+  DEFINE(PROOT_TSK_CRED,	offsetof(struct task_struct,cred));
+  DEFINE(PROOT_CRED_UID,	offsetof(struct cred,uid));
+  DEFINE(PROOT_CRED_EUID,	offsetof(struct cred,euid));
+  DEFINE(PROOT_CRED_FSUID,	offsetof(struct cred,fsuid));
+  DEFINE(PROOT_THREAD_TSK,	offsetof(struct thread_info,task));
+  DEFINE(PROOT_THREAD_ADDR_LIMIT,	offsetof(struct thread_info,addr_limit));
+#endif /* CONFIG_OPPO_ROOT_CHECK */
+#endif /* VENDOR_EDIT */
   return 0;
 }
