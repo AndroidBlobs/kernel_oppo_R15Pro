@@ -2059,6 +2059,10 @@ struct task_struct {
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 	unsigned long	task_state_change;
 #endif
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+	atomic_t reclaiming;
+	atomic_t cancel_reclaim;
+#endif
 	int pagefault_disabled;
 /* CPU-specific state of this task */
 	struct thread_struct thread;
@@ -2316,6 +2320,10 @@ extern void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, 
 /*
  * Per process flags
  */
+#ifdef VENDOR_EDIT
+/* fanhui@PhoneSW.BSP, 2016/02/02, DeathHealer, set the task to be killed */
+#define PF_OPPO_KILLING	0x00000001
+#endif
 #define PF_WAKE_UP_IDLE 0x00000002	/* try to wake up on an idle CPU */
 #define PF_EXITING	0x00000004	/* getting shut down */
 #define PF_EXITPIDONE	0x00000008	/* pi exit done on shut down */
@@ -2516,6 +2524,10 @@ struct cpu_cycle_counter_cb {
 #define MAX_NUM_CGROUP_COLOC_ID	20
 
 #ifdef CONFIG_SCHED_HMP
+#ifdef VENDOR_EDIT
+//jie.cheng@swdp.shanghai, 2015/11/09, export some symbol
+extern int sched_boost(void);
+#endif /* VENDOR_EDIT */
 extern void free_task_load_ptrs(struct task_struct *p);
 extern int sched_set_window(u64 window_start, unsigned int window_size);
 extern unsigned long sched_get_busy(int cpu);
@@ -2976,6 +2988,40 @@ static inline int copy_thread_tls(
 extern void flush_thread(void);
 extern void exit_thread(void);
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_ELSA_STUB)
+//zhoumingjun@Swdp.shanghai, 2017/04/19, add process_event_notifier support
+#define PROCESS_EVENT_CREATE 1
+#define PROCESS_EVENT_EXIT 2
+#define PROCESS_EVENT_UID 3
+#define PROCESS_EVENT_SOCKET 4
+#define PROCESS_EVENT_BINDER 5
+#define PROCESS_EVENT_BINDER_NO_WORK 6
+#define PROCESS_EVENT_SIGNAL_FROZEN 7
+
+#define BINDER_DESCRIPTOR_SIZE	70
+struct process_event_data {
+	pid_t pid;
+	kuid_t uid;
+	kuid_t old_uid;
+	long reason;
+	long reason2;
+	__u32 binder_flag;
+	int freeze_binder_count;
+	char buf[BINDER_DESCRIPTOR_SIZE];
+	void *priv;
+};
+extern int process_event_register_notifier(struct notifier_block *nb);
+extern int process_event_unregister_notifier(struct notifier_block *nb);
+extern int process_event_notifier_call_chain(unsigned long action,
+					struct process_event_data *pe_data);
+
+//zhoumingjun@Swdp.shanghai, 2017/07/06, add process_event_notifier_atomic support
+extern int process_event_register_notifier_atomic(struct notifier_block *nb);
+extern int process_event_unregister_notifier_atomic(struct notifier_block *nb);
+extern int process_event_notifier_call_chain_atomic(unsigned long action,
+					struct process_event_data *pe_data);
+#endif
+
 extern void exit_files(struct task_struct *);
 extern void __cleanup_sighand(struct sighand_struct *);
 
@@ -3273,6 +3319,17 @@ static inline int fatal_signal_pending(struct task_struct *p)
 {
 	return signal_pending(p) && __fatal_signal_pending(p);
 }
+
+//#ifdef VENDOR_EDIT //fangpan@Swdp.shanghai,2015/11/12
+static inline int hung_long_and_fatal_signal_pending(struct task_struct *p)
+{
+#ifdef CONFIG_DETECT_HUNG_TASK
+	return fatal_signal_pending(p) && (p->flags & PF_OPPO_KILLING);
+#else
+	return 0;
+#endif
+}
+//#endif
 
 static inline int signal_pending_state(long state, struct task_struct *p)
 {
