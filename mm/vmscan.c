@@ -144,9 +144,15 @@ struct scan_control {
 #endif
 
 /*
- * From 0 .. 100.  Higher means more swappy.
+ * From 0 .. 200.  Higher means more swappy.
  */
 int vm_swappiness = 60;
+#ifdef VENDOR_EDIT //yixue.ge@psw.bsp.kernel 20170720 add for add direct_vm_swappiness
+/*
+ * Direct reclaim swappiness, exptct 0 - 60. Higher means more swappy and slower.
+ */
+int direct_vm_swappiness = 60;
+#endif
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -468,8 +474,22 @@ static unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 	if (memcg && !memcg_kmem_is_active(memcg))
 		return 0;
 
+#ifndef VENDOR_EDIT 
+/*Shiming.Zhang@PSW.BSP.Kernel.MM 20170830 modify for not shrinking too aggressively */
 	if (nr_scanned == 0)
 		nr_scanned = SWAP_CLUSTER_MAX;
+#else
+	if (nr_scanned == 0){
+		nr_scanned = SWAP_CLUSTER_MAX;
+		/*
+		 * nr_scanned is 0 means that nr_eligible also might be too small,
+		 * for example, it could be zero for empty memcg i.e. no any task.
+		 * in order to avoid shrinking slab too overly, 
+		 * we set min of nr_eligible in case it is 0 or too small.
+		 */
+		nr_eligible = max(nr_eligible, nr_scanned << DEF_PRIORITY);
+	}
+#endif /*VENDOR_EDIT*/
 
 	if (!down_read_trylock(&shrinker_rwsem)) {
 		/*
@@ -934,6 +954,20 @@ static void page_check_dirty_writeback(struct page *page,
 /*
  * shrink_page_list() returns the number of reclaimed pages
  */
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+static unsigned long shrink_page_list(struct list_head *page_list,
+				      struct zone *zone,
+				      struct scan_control *sc,
+				      enum ttu_flags ttu_flags,
+				      unsigned long *ret_nr_dirty,
+				      unsigned long *ret_nr_unqueued_dirty,
+				      unsigned long *ret_nr_congested,
+				      unsigned long *ret_nr_writeback,
+				      unsigned long *ret_nr_immediate,
+				      bool force_reclaim,
+				      int force_fast_slow)
+#else
 static unsigned long shrink_page_list(struct list_head *page_list,
 				      struct zone *zone,
 				      struct scan_control *sc,
@@ -944,6 +978,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 				      unsigned long *ret_nr_writeback,
 				      unsigned long *ret_nr_immediate,
 				      bool force_reclaim)
+#endif
 {
 	LIST_HEAD(ret_pages);
 	LIST_HEAD(free_pages);
@@ -1105,7 +1140,12 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		if (PageAnon(page) && !PageSwapCache(page)) {
 			if (!(sc->gfp_mask & __GFP_IO))
 				goto keep_locked;
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+			if (!add_to_swap(page, page_list, force_fast_slow))
+#else
 			if (!add_to_swap(page, page_list))
+#endif
 				goto activate_locked;
 			may_enter_fs = 1;
 
@@ -1244,7 +1284,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 		 * we obviously don't have to worry about waking up a process
 		 * waiting on the page lock, because there are no references.
 		 */
-		__clear_page_locked(page);
+		__ClearPageLocked(page);
 free_it:
 		nr_reclaimed++;
 
@@ -1320,9 +1360,17 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 		}
 	}
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+	ret = shrink_page_list(&clean_pages, zone, &sc,
+			TTU_UNMAP|TTU_IGNORE_ACCESS,
+			&dummy1, &dummy2, &dummy3, &dummy4, &dummy5, true,
+			sysctl_swap_force_fast_slow ? GET_SWAP_FAST : GET_SWAP_NOLIMIT);
+#else
 	ret = shrink_page_list(&clean_pages, zone, &sc,
 			TTU_UNMAP|TTU_IGNORE_ACCESS,
 			&dummy1, &dummy2, &dummy3, &dummy4, &dummy5, true);
+#endif
 	list_splice(&clean_pages, page_list);
 	mod_zone_page_state(zone, NR_ISOLATED_FILE, -ret);
 	return ret;
@@ -1348,9 +1396,17 @@ unsigned long reclaim_pages_from_list(struct list_head *page_list,
 	list_for_each_entry(page, page_list, lru)
 		ClearPageActive(page);
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+	nr_reclaimed = shrink_page_list(page_list, NULL, &sc,
+			TTU_UNMAP|TTU_IGNORE_ACCESS,
+			&dummy1, &dummy2, &dummy3, &dummy4, &dummy5, true,
+			sysctl_swap_force_fast_slow ? GET_SWAP_SLOW : GET_SWAP_NOLIMIT);
+#else
 	nr_reclaimed = shrink_page_list(page_list, NULL, &sc,
 			TTU_UNMAP|TTU_IGNORE_ACCESS,
 			&dummy1, &dummy2, &dummy3, &dummy4, &dummy5, true);
+#endif
 
 	while (!list_empty(page_list)) {
 		page = lru_to_page(page_list);
@@ -1746,10 +1802,19 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	if (nr_taken == 0)
 		return 0;
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+	nr_reclaimed = shrink_page_list(&page_list, zone, sc, TTU_UNMAP,
+				&nr_dirty, &nr_unqueued_dirty, &nr_congested,
+				&nr_writeback, &nr_immediate,
+				false,
+				sysctl_swap_force_fast_slow ? GET_SWAP_FAST : GET_SWAP_NOLIMIT);
+#else
 	nr_reclaimed = shrink_page_list(&page_list, zone, sc, TTU_UNMAP,
 				&nr_dirty, &nr_unqueued_dirty, &nr_congested,
 				&nr_writeback, &nr_immediate,
 				false);
+#endif
 
 	spin_lock_irq(&zone->lru_lock);
 
@@ -1828,13 +1893,14 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	 */
 	if (!sc->hibernation_mode && !current_is_kswapd() &&
 	    current_may_throttle())
-		wait_iff_congested(zone, BLK_RW_ASYNC, HZ/10);
+               wait_iff_congested(zone, BLK_RW_ASYNC, HZ/10);
 
-	trace_mm_vmscan_lru_shrink_inactive(zone->zone_pgdat->node_id,
-		zone_idx(zone),
-		nr_scanned, nr_reclaimed,
-		sc->priority,
-		trace_shrink_flags(file));
+       trace_mm_vmscan_lru_shrink_inactive(zone->zone_pgdat->node_id,
+               zone_idx(zone),
+               nr_scanned, nr_reclaimed,
+               sc->priority,
+               trace_shrink_flags(file));
+
 	return nr_reclaimed;
 }
 
@@ -2010,8 +2076,12 @@ static bool inactive_anon_is_low_global(struct zone *zone)
 
 	active = zone_page_state(zone, NR_ACTIVE_ANON);
 	inactive = zone_page_state(zone, NR_INACTIVE_ANON);
-
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-07-21, try to shrink more anon pages*/
+	return inactive < active;
+#else
 	return inactive * zone->inactive_ratio < active;
+#endif /*VENDOR_EDIT*/
 }
 
 /**
@@ -2058,6 +2128,25 @@ static inline bool inactive_anon_is_low(struct lruvec *lruvec)
  */
 static bool inactive_file_is_low(struct lruvec *lruvec)
 {
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Tech.Performance, 2018-07-30, keep more file pages*/
+	unsigned long gb;
+	unsigned long inactive;
+	unsigned long active;
+	unsigned long inactive_ratio;
+
+	inactive = get_lru_size(lruvec, LRU_INACTIVE_FILE);
+	active = get_lru_size(lruvec, LRU_ACTIVE_FILE);
+
+	gb = (inactive + active) >> (30 - PAGE_SHIFT);
+
+	if (gb)
+		inactive_ratio = min(2UL, int_sqrt(10 * gb));
+	else
+		inactive_ratio = 1;
+
+	return inactive * inactive_ratio < active;
+#else
 	unsigned long inactive;
 	unsigned long active;
 
@@ -2065,6 +2154,7 @@ static bool inactive_file_is_low(struct lruvec *lruvec)
 	active = get_lru_size(lruvec, LRU_ACTIVE_FILE);
 
 	return active > inactive;
+#endif /*VENDOR_EDIT*/
 }
 
 static bool inactive_list_is_low(struct lruvec *lruvec, enum lru_list lru)
@@ -2136,11 +2226,20 @@ static void get_scan_count(struct lruvec *lruvec, int swappiness,
 		if (!mem_cgroup_lruvec_online(lruvec))
 			force_scan = true;
 	}
+#ifdef VENDOR_EDIT //yixue.ge@psw.bsp.kernel 20170720 add for add direct_vm_swappiness
+	else {
+		swappiness = direct_vm_swappiness;
+	}
+#endif
 	if (!global_reclaim(sc))
 		force_scan = true;
 
 	/* If we have no swap space, do not bother scanning anon pages. */
+#ifndef VENDOR_EDIT //yixue.ge@psw.bsp.kernel.driver 20170810 modify for reserver some zram disk size
 	if (!sc->may_swap || (get_nr_swap_pages() <= 0)) {
+#else
+	if (!sc->may_swap || (get_nr_swap_pages() <= total_swap_pages>>6)) {
+#endif
 		scan_balance = SCAN_FILE;
 		goto out;
 	}

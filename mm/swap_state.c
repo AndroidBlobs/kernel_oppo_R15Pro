@@ -49,6 +49,11 @@ static struct {
 	unsigned long find_total;
 } swap_cache_info;
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+int sysctl_swap_force_fast_slow = 0;
+#endif
+
 unsigned long total_swapcache_pages(void)
 {
 	int i;
@@ -58,7 +63,10 @@ unsigned long total_swapcache_pages(void)
 		ret += swapper_spaces[i].nrpages;
 	return ret;
 }
-
+#ifdef VENDOR_EDIT
+//fangpan@Swdp.shanghai, 2015/11/26, add interface for resmon module
+EXPORT_SYMBOL(total_swapcache_pages);
+#endif
 static atomic_t swapin_readahead_hits = ATOMIC_INIT(4);
 
 void show_swap_cache_info(void)
@@ -160,7 +168,12 @@ void __delete_from_swap_cache(struct page *page)
  * Allocate swap space for the page and add the page to the
  * swap cache.  Caller needs to hold the page lock. 
  */
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+int add_to_swap(struct page *page, struct list_head *list, int force_fast_slow)
+#else
 int add_to_swap(struct page *page, struct list_head *list)
+#endif
 {
 	swp_entry_t entry;
 	int err;
@@ -168,7 +181,12 @@ int add_to_swap(struct page *page, struct list_head *list)
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	VM_BUG_ON_PAGE(!PageUptodate(page), page);
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+	entry = get_swap_page(force_fast_slow);
+#else
 	entry = get_swap_page();
+#endif
 	if (!entry.val)
 		return 0;
 
@@ -355,7 +373,7 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		}
 
 		/* May fail (-ENOMEM) if radix-tree node allocation failed. */
-		__set_page_locked(new_page);
+		__SetPageLocked(new_page);
 		SetPageSwapBacked(new_page);
 		err = __add_to_swap_cache(new_page, entry);
 		if (likely(!err)) {
@@ -369,7 +387,7 @@ struct page *__read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 		}
 		radix_tree_preload_end();
 		ClearPageSwapBacked(new_page);
-		__clear_page_locked(new_page);
+		__ClearPageLocked(new_page);
 		/*
 		 * add_to_swap_cache() doesn't return -EEXIST, so we can safely
 		 * clear SWAP_HAS_CACHE flag.

@@ -657,7 +657,12 @@ no_page:
 	return 0;
 }
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+swp_entry_t get_swap_page(int force_fast_slow)
+#else
 swp_entry_t get_swap_page(void)
+#endif
 {
 	struct swap_info_struct *si, *next;
 	pgoff_t offset;
@@ -695,6 +700,17 @@ start_over:
 		spin_unlock(&swap_avail_lock);
 start:
 		spin_lock(&si->lock);
+
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+		if ((force_fast_slow == GET_SWAP_FAST && !(si->flags & SWP_FAST)) ||
+		    (force_fast_slow == GET_SWAP_SLOW && (si->flags & SWP_FAST))) {
+			spin_lock(&swap_avail_lock);
+			spin_unlock(&si->lock);
+			goto nextsi;
+		}
+#endif
+
 		if (!si->highest_bit || !(si->flags & SWP_WRITEOK)) {
 			spin_lock(&swap_avail_lock);
 			if (plist_node_empty(&si->avail_list)) {

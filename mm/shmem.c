@@ -825,7 +825,12 @@ static int shmem_writepage(struct page *page, struct writeback_control *wbc)
 		SetPageUptodate(page);
 	}
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_PROCESS_RECLAIM)
+//zhoumingjun@Swdp.shanghai, 2017/07/27, force get swap page from fast/slow devices for memory reclaim
+	swap = get_swap_page(sysctl_swap_force_fast_slow ? GET_SWAP_FAST : GET_SWAP_NOLIMIT);
+#else
 	swap = get_swap_page();
+#endif
 	if (!swap.val)
 		goto redirty;
 
@@ -1003,7 +1008,7 @@ static int shmem_replace_page(struct page **pagep, gfp_t gfp,
 	copy_highpage(newpage, oldpage);
 	flush_dcache_page(newpage);
 
-	__set_page_locked(newpage);
+	__SetPageLocked(newpage);
 	SetPageUptodate(newpage);
 	SetPageSwapBacked(newpage);
 	set_page_private(newpage, swap_index);
@@ -1195,7 +1200,7 @@ repeat:
 		}
 
 		__SetPageSwapBacked(page);
-		__set_page_locked(page);
+		__SetPageLocked(page);
 		if (sgp == SGP_WRITE)
 			__SetPageReferenced(page);
 
