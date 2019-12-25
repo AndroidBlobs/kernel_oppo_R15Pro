@@ -41,6 +41,8 @@ struct compat_ion_handle_data {
 
 #define COMPAT_ION_IOC_ALLOC	_IOWR(ION_IOC_MAGIC, 0, \
 				      struct compat_ion_allocation_data)
+#define COMPAT_ION_IOC_ALLOC_NOSYNC	_IOWR(ION_IOC_MAGIC, 8, \
+				      struct compat_ion_allocation_data)
 #define COMPAT_ION_IOC_FREE	_IOWR(ION_IOC_MAGIC, 1, \
 				      struct compat_ion_handle_data)
 #define COMPAT_ION_IOC_CUSTOM	_IOWR(ION_IOC_MAGIC, 6, \
@@ -129,6 +131,25 @@ long compat_ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return -ENOTTY;
 
 	switch (cmd) {
+	case COMPAT_ION_IOC_ALLOC_NOSYNC:
+	{
+		struct compat_ion_allocation_data __user *data32;
+		struct ion_allocation_data __user *data;
+		int err;
+
+		data32 = compat_ptr(arg);
+		data = compat_alloc_user_space(sizeof(*data));
+		if (data == NULL)
+			return -EFAULT;
+
+		err = compat_get_ion_allocation_data(data32, data);
+		if (err)
+			return err;
+		ret = filp->f_op->unlocked_ioctl(filp, ION_IOC_ALLOC_NOSYNC,
+							(unsigned long)data);
+		err = compat_put_ion_allocation_data(data32, data);
+		return ret ? ret : err;
+	}
 	case COMPAT_ION_IOC_ALLOC:
 	{
 		struct compat_ion_allocation_data __user *data32;

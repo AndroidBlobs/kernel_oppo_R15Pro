@@ -1610,6 +1610,24 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EFAULT;
 
 	switch (cmd) {
+#ifdef VENDOR_EDIT /* Shiming.Zhang@PSW.BSP.Driver.ION */
+	case ION_IOC_ALLOC_NOSYNC:
+	{
+		struct ion_handle *handle;
+
+		handle = __ion_alloc(client, data.allocation.len,
+						data.allocation.align,
+						data.allocation.heap_id_mask,
+						data.allocation.flags | ION_FLAG_ALLOC_NO_SYNC, true);
+		if (IS_ERR(handle))
+			return PTR_ERR(handle);
+
+		data.allocation.handle = handle->id;
+
+		cleanup_handle = handle;
+		break;
+	}
+#endif
 	case ION_IOC_ALLOC:
 	{
 		struct ion_handle *handle;

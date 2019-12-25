@@ -134,6 +134,22 @@ static struct notifier_block msm_ion_nb = {
 	.notifier_call = msm_ion_lowmem_notifier,
 };
 
+#ifdef VENDOR_EDIT
+//fangpan@Swdp.shanghai, 2016/02/02, add ion memory status interface
+struct ion_heap* get_system_ion_heap(enum ion_heap_type heap_type)
+{
+	int i = 0;
+	if(heaps != NULL) {
+		for(i = 0; i < num_heaps; i++)
+			if(heaps[i] && heaps[i]->type == heap_type)
+				return heaps[i];
+	}
+	return NULL;
+
+}
+EXPORT_SYMBOL(get_system_ion_heap);
+#endif
+
 struct ion_client *msm_ion_client_create(const char *name)
 {
 	/*
@@ -807,6 +823,16 @@ long msm_ion_custom_ioctl(struct ion_client *client,
 	return 0;
 }
 
+#if defined(VENDOR_EDIT) && defined(CONFIG_ARM64) /* Shiming.Zhang@PSW.BSP.Driver.ION */
+int msm_ion_heap_pages_zero(struct page **pages, int num_pages)
+{
+        int i;
+        for (i = 0; i < num_pages; i ++) {
+                clear_page(page_address(pages[i]));
+        }
+        return 0;
+}
+#else
 #define MAX_VMAP_RETRIES 10
 
 /**
@@ -853,6 +879,7 @@ int msm_ion_heap_pages_zero(struct page **pages, int num_pages)
 
 	return 0;
 }
+#endif
 
 int msm_ion_heap_alloc_pages_mem(struct pages_mem *pages_mem)
 {

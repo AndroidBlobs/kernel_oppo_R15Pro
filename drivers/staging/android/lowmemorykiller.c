@@ -52,6 +52,14 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/almk.h>
+#ifdef VENDOR_EDIT
+//Jiemin.Zhu@PSW.AD.Performance.Memory.1139862, 2016/05/31, Add for lowmemorykiller uevent
+#include <linux/module.h>
+#endif /* VENDOR_EDIT */
+#ifdef VENDOR_EDIT
+/*yixue.ge@PSW.BSP.Kernel.Driver 20170808 modify for get some data about performance */
+#include <linux/proc_fs.h>
+#endif /*VENDOR_EDIT*/
 
 #ifdef CONFIG_HIGHMEM
 #define _ZONE ZONE_HIGHMEM
@@ -78,6 +86,12 @@ static int lowmem_minfree[6] = {
 };
 static int lowmem_minfree_size = 4;
 static int lmk_fast_run = 1;
+#ifdef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM 2018-01-15 modify for lowmemkill count */
+static bool lmk_cnt_enable = false;
+static unsigned long adaptive_lowmem_kill_count = 0;
+static unsigned long tatal_lowmem_kill_count = 0;
+#endif /*VENDOR_EDIT*/
 
 static unsigned long lowmem_deathpending_timeout;
 
@@ -137,7 +151,13 @@ int adjust_minadj(short *min_score_adj)
 		else
 			ret = VMPRESSURE_ADJUST_NORMAL;
 		*min_score_adj = adj_max_shift;
+#ifdef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM 2018-01-15 modify for adaptive lowmemkill count */
+/*Maybe it can not select task to kill, it's just a rough number */
+		if (lmk_cnt_enable)
+			adaptive_lowmem_kill_count++;
 	}
+#endif /*VENDOR_EDIT*/
 	atomic_set(&shift_adj, 0);
 
 	return ret;
@@ -404,6 +424,46 @@ void tune_lmk_param(int *other_free, int *other_file, struct shrink_control *sc)
 	}
 }
 
+#ifdef VENDOR_EDIT
+/*yixue.ge@PSW.BSP.Kernel.Driver 20170808 modify for get some data about performance */
+static ssize_t lowmem_kill_count_proc_read(struct file *file, char __user *buf,
+		size_t count,loff_t *off)
+{
+	char page[256] = {0};
+	int len = 0;
+
+	if (!lmk_cnt_enable)
+		return 0;
+
+	len = sprintf(&page[len],"adaptive_lowmem_kill_count:%lu\ntotal_lowmem_kill_count:%lu\n",
+				adaptive_lowmem_kill_count, tatal_lowmem_kill_count);
+
+	if(len > *off)
+	   len -= *off;
+	else
+	   len = 0;
+
+	if(copy_to_user(buf,page,(len < count ? len : count))){
+	   return -EFAULT;
+	}
+	*off += len < count ? len : count;
+	return (len < count ? len : count);
+
+}
+
+struct file_operations lowmem_kill_count_proc_fops = {
+	.read = lowmem_kill_count_proc_read,
+};
+
+static int __init setup_lowmem_killinfo(void)
+{
+
+	proc_create("lowmemkillcounts", S_IRUGO, NULL, &lowmem_kill_count_proc_fops);
+	return 0;
+}
+module_init(setup_lowmem_killinfo);
+#endif /* VENDOR_EDIT */
+
 static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 {
 	struct task_struct *tsk;
@@ -537,6 +597,12 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		cache_limit = minfree * (long)(PAGE_SIZE / 1024);
 		free = other_free * (long)(PAGE_SIZE / 1024);
 		trace_lowmemory_kill(selected, cache_size, cache_limit, free);
+
+#ifdef VENDOR_EDIT
+/*yixue.ge@PSW.BSP.Kernel.Driver 20170808 modify for get some data about performance */
+		if (lmk_cnt_enable)
+			tatal_lowmem_kill_count++;
+#endif /* VENDOR_EDIT */
 		lowmem_print(1, "Killing '%s' (%d), adj %hd,\n" \
 			        "   to free %ldkB on behalf of '%s' (%d) because\n" \
 			        "   cache %ldkB is below limit %ldkB for oom_score_adj %hd\n" \
@@ -564,8 +630,16 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			     (long)zcache_pages() * (long)(PAGE_SIZE / 1024),
 			     sc->gfp_mask);
 
-		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
+#ifdef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM. 2018/01/15, modify for show more meminfo*/
 			show_mem(SHOW_MEM_FILTER_NODES);
+#endif /*VENDOR_EDIT*/
+
+		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
+#ifndef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM. 2018/01/15, modify for show more meminfo*/
+			show_mem(SHOW_MEM_FILTER_NODES);
+#endif /*VENDOR_EDIT*/
 			dump_tasks(NULL, NULL);
 		}
 
@@ -698,4 +772,9 @@ module_param_array_named(minfree, lowmem_minfree, uint, &lowmem_minfree_size,
 			 S_IRUGO | S_IWUSR);
 module_param_named(debug_level, lowmem_debug_level, uint, S_IRUGO | S_IWUSR);
 module_param_named(lmk_fast_run, lmk_fast_run, int, S_IRUGO | S_IWUSR);
+
+#ifdef VENDOR_EDIT
+/*huacai.zhou@PSW.BSP.Kernel.MM 2018-01-15 modify for lowmemkill count */
+module_param_named(lmk_cnt_enable, lmk_cnt_enable, bool, S_IRUGO | S_IWUSR);
+#endif /*VENDOR_EDIT*/
 

@@ -36,6 +36,11 @@
 #include <linux/msm-bus.h>
 #include <linux/msm-bus-board.h>
 #include <linux/i2c/i2c-msm-v2.h>
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@PSW.BSP.CHG.Basic, 2017/10/20, sjc Add for charging */
+#include "../../power/oppo/oppo_vooc.h"
+#include <soc/oppo/boot_mode.h>
+#endif
 
 #ifdef DEBUG
 static const enum msm_i2_debug_level DEFAULT_DBG_LVL = MSM_DBG;
@@ -2060,6 +2065,95 @@ static void i2c_msm_xfer_calc_timeout(struct i2c_msm_ctrl *ctrl)
 	ctrl->xfer.timeout = usecs_to_jiffies(xfer_max_usec);
 }
 
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@PSW.BSP.CHG.Basic, 2017/10/20, sjc Add for charging */
+#define I2C_RESET_BUS	2
+static bool i2c_err_occured = false;
+
+bool oppo_get_fg_i2c_err_occured(void)
+{
+	return i2c_err_occured;
+}
+EXPORT_SYMBOL(oppo_get_fg_i2c_err_occured);
+
+void oppo_set_fg_i2c_err_occured(bool i2c_err)
+{
+	i2c_err_occured = i2c_err;
+}
+EXPORT_SYMBOL(oppo_set_fg_i2c_err_occured);
+
+static void i2c_oppo_gpio_reset(struct i2c_msm_ctrl *ctrl)
+{
+	int ret = 0;
+	int i = 0;
+	static bool i2c_reset_processing = false;
+	int boot_mode = get_boot_mode();
+
+	if (ctrl == NULL)
+		return;
+
+	if ((boot_mode != MSM_BOOT_MODE__NORMAL)
+			&& (boot_mode != MSM_BOOT_MODE__RECOVERY)
+			&& (boot_mode != MSM_BOOT_MODE__SILENCE)
+			&& (boot_mode != MSM_BOOT_MODE__SAU)
+			&& (boot_mode != MSM_BOOT_MODE__CHARGE)) {
+		dev_err(ctrl->dev, "%s: get_boot_mode[%d], return\n", __func__, boot_mode);
+		return;
+	}
+
+	if (i2c_reset_processing == true) {
+		dev_err(ctrl->dev, "%s: i2c_reset is processing, return\n", __func__);
+		return;
+	}
+
+	i2c_reset_processing = true;
+
+	if (!IS_ERR_OR_NULL(ctrl->rsrcs.gpio_state_pulldown)) {
+		dev_err(ctrl->dev, "%s: set gpio_state_pulldown\n", __func__);
+		ret = pinctrl_select_state(ctrl->rsrcs.pinctrl, ctrl->rsrcs.gpio_state_pulldown);
+		if (ret) {
+			dev_err(ctrl->dev, "%s: error pinctrl_select_state pulldown, ret:%d\n", __func__, ret);
+			goto err;
+		}
+	} else {
+		goto err;
+	}
+
+	for (i = 0; i < 220; i++) {
+		usleep_range(10000, 11000);
+		if (oppo_vooc_get_fastchg_started() == true && oppo_vooc_get_fastchg_ing() == false) {
+			dev_err(ctrl->dev, "%s: vooc ready to start, don't pull down i2c, i:%d\n", __func__, i);
+			break;
+		}
+	}
+	oppo_set_fg_i2c_err_occured(true);
+
+	if (!IS_ERR_OR_NULL(ctrl->rsrcs.gpio_state_active)) {
+		dev_err(ctrl->dev, "%s: set gpio_state_active\n", __func__);
+		ret = pinctrl_select_state(ctrl->rsrcs.pinctrl, ctrl->rsrcs.gpio_state_active);
+		if (ret) {
+			dev_err(ctrl->dev, "%s:error pinctrl_select_state active, ret:%d\n", __func__, ret);
+			goto err;
+		}
+	} else {
+		goto err;
+	}
+
+	i2c_reset_processing = false;
+	dev_err(ctrl->dev, "%s: gpio reset successful id:%d\n", __func__, ctrl->adapter.nr);
+	return;
+
+err:
+	i2c_reset_processing = false;
+}
+#endif /*VENDOR_EDIT*/
+
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@PSW.BSP.CHG.Basic, 2017/10/20, sjc Add for charging */
+extern int rpmb_is_enable(void);
+static unsigned int err_count = 0;
+#define MAX_RESET_COUNT	10
+#endif
 static int i2c_msm_xfer_wait_for_completion(struct i2c_msm_ctrl *ctrl,
 						struct completion *complete)
 {
@@ -2086,6 +2180,24 @@ static int i2c_msm_xfer_wait_for_completion(struct i2c_msm_ctrl *ctrl,
 		i2c_msm_prof_evnt_add(ctrl, MSM_DBG, I2C_MSM_COMPLT_OK,
 					xfer->timeout, time_left, 0);
 	}
+
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@PSW.BSP.CHG.Basic, 2017/10/20, sjc Add for charging */
+	if (ctrl->adapter.nr == I2C_RESET_BUS && rpmb_is_enable()) {
+		if (ret) {
+			if (err_count < MAX_RESET_COUNT) {
+				i2c_oppo_gpio_reset(ctrl);
+			} else {
+				dev_err(ctrl->dev, "err_count(%d) >= %d so not reset\n", err_count, MAX_RESET_COUNT);
+			}
+			err_count++;
+		} else {
+			if (err_count)
+				dev_err(ctrl->dev, "err_count recovery\n");
+			err_count = 0;
+		}
+	}
+#endif
 
 	return ret;
 }
@@ -2616,6 +2728,12 @@ static int i2c_msm_rsrcs_gpio_pinctrl_init(struct i2c_msm_ctrl *ctrl)
 
 	ctrl->rsrcs.gpio_state_suspend =
 		i2c_msm_rsrcs_gpio_get_state(ctrl, I2C_MSM_PINCTRL_SUSPEND);
+
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@PSW.BSP.CHG.Basic, 2017/10/20, sjc Add for charging */
+	ctrl->rsrcs.gpio_state_pulldown =
+		i2c_msm_rsrcs_gpio_get_state(ctrl, I2C_MSM_PINCTRL_PULLDOWN);
+#endif
 
 	return 0;
 }
