@@ -4439,7 +4439,6 @@ kgsl_get_unmapped_area(struct file *file, unsigned long addr,
 				private->pid, current->mm->mmap_base, addr,
 				pgoff, len, (int) val);
 	}
-
 put:
 	kgsl_mem_entry_put(entry);
 	return val;
